@@ -1,58 +1,49 @@
+using MongoDB.Driver;
 using Pokemon.Models;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace Pokemon.Api.Services
 {
     public class PokemonService : IPokemonService
     {
-        private readonly List<Pokemons> _pokemons;
+        private readonly IMongoCollection<Pokemons> _pokemonCollection;
 
-        public PokemonService()
+        public PokemonService(IMongoClient client, IConfiguration configuration)
         {
-            // Initialize the list with some default data
-            _pokemons = new List<Pokemons>
-            {
-                new Pokemons { Id = 2, Name = "Charmander", Type = "Fire", Ability = "Blaze", Level = 18 },
-                new Pokemons { Id = 1, Name = "Pikachu", Type = "Electric", Ability = "Static", Level = 25 },
-                new Pokemons { Id = 3, Name = "Squirtle", Type = "Water", Ability = "Torrent", Level = 16 }
-            };
+            var database = client.GetDatabase(configuration["MongoDB:DatabaseName"]);
+            _pokemonCollection = database.GetCollection<Pokemons>("Pokemons");
         }
 
-        public List<Pokemons> GetAllPokemons() => _pokemons;
+        public async Task<List<Pokemons>> GetAllPokemons() =>
+            await _pokemonCollection.Find(_ => true).ToListAsync();
 
-        public Pokemons GetPokemonById(int id) => _pokemons.FirstOrDefault(p => p.Id == id);
+        public async Task<Pokemons?> GetPokemonById(int id) =>
+            await _pokemonCollection.Find(p => p.Id == id).FirstOrDefaultAsync();
 
-        public List<Pokemons> GetPokemonByType(string type) =>
-            _pokemons.Where(p => p.Type.Equals(type, System.StringComparison.OrdinalIgnoreCase)).ToList();
+        public async Task<List<Pokemons>> GetPokemonByType(string type) =>
+            await _pokemonCollection.Find(p => p.Type.Equals(type, System.StringComparison.OrdinalIgnoreCase)).ToListAsync();
 
-        public Pokemons AddPokemon(Pokemons pokemon)
+        public async Task<Pokemons> AddPokemon(Pokemons pokemon)
         {
-            pokemon.Id = _pokemons.Count > 0 ? _pokemons.Max(p => p.Id) + 1 : 1;
-            _pokemons.Add(pokemon);
+            var maxId = _pokemonCollection.AsQueryable().AsEnumerable().Max(p => (int?)p.Id) ?? 0;
+            pokemon.Id = maxId + 1;
+
+            await _pokemonCollection.InsertOneAsync(pokemon);
             return pokemon;
         }
 
-        public Pokemons UpdatePokemon(int id, Pokemons updatedPokemon)
+        public async Task<Pokemons?> UpdatePokemon(int id, Pokemons updatedPokemon)
         {
-            var pokemon = _pokemons.FirstOrDefault(p => p.Id == id);
-            if (pokemon == null) return null;
-
-            pokemon.Name = updatedPokemon.Name;
-            pokemon.Type = updatedPokemon.Type;
-            pokemon.Ability = updatedPokemon.Ability;
-            pokemon.Level = updatedPokemon.Level;
-
-            return pokemon;
+            var result = await _pokemonCollection.ReplaceOneAsync(p => p.Id == id, updatedPokemon);
+            return result.IsAcknowledged && result.ModifiedCount > 0 ? updatedPokemon : null;
         }
 
-        public bool DeletePokemon(int id)
+        public async Task<bool> DeletePokemon(int id)
         {
-            var pokemon = _pokemons.FirstOrDefault(p => p.Id == id);
-            if (pokemon == null) return false;
-
-            _pokemons.Remove(pokemon);
-            return true;
+            var result = await _pokemonCollection.DeleteOneAsync(p => p.Id == id);
+            return result.IsAcknowledged && result.DeletedCount > 0;
         }
     }
 }
